@@ -30,19 +30,20 @@ jobs:
       id-token: write
     uses: denis-peshkov/ci-templates/.github/workflows/dotnet-reusable.yml@master
     with:
-      solution: 'Cross.Identity.slnx'
-      product: 'Cross.Identity'
+      package: 'Cross.Identity'
       description: 'Cross.Identity: identity and authentication flows with JWT and process engine. Published on Nuget at https://www.nuget.org/packages/Cross.Identity'
-      repository_url: 'https://github.com/denis-peshkov/Cross.Identity.git'
-      sonar_organization: 'denis-peshkov'
-      sonar_project_key: 'Cross.Identity'
-      sonar_project_name: 'Cross.Identity'
-      sonar_sources: 'Cross.Identity/'
-      sonar_tests: 'Cross.Identity.Tests/'
-      # Optional, only if needed (Cross.Identity):
+      # Optional overrides (defaults derived from package):
       # sonar_cpd_exclusions: '**/ProcessEngine/Definitions/Templates/**'
-      nuspec_path: 'Cross.Identity/config.nuspec'
-      package_name: 'Cross.Identity'
+      # solution: 'Cross.Identity.slnx'
+      # sonar_tests: 'Cross.Identity.UnitTests/'
+      # nuspec_path: '_nuget/config.nuspec'
+      # dotnet_versions: |
+      #   3.1.x
+      #   6.0.x
+      #   7.0.x
+      #   8.0.x
+      #   9.0.x
+      #   10.0.x
     secrets:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
       TAGTOKEN: ${{ secrets.TAGTOKEN }}

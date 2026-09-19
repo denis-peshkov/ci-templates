@@ -8,7 +8,7 @@ The `.NET` etalon matches the inline CI used by:
 - [Cross.CQRS](https://github.com/denis-peshkov/Cross.CQRS)
 - [Cross.CQRS.EF](https://github.com/denis-peshkov/Cross.CQRS.EF)
 
-Caller repositories keep only triggers + project-specific `with:` / `secrets:`. Shared steps live here.
+Caller repositories pass mainly `package` + `description`. Paths and Sonar/NuGet ids are derived unless overridden.
 
 ## Contents
 
@@ -37,9 +37,9 @@ Runs on `ubuntu-22.04`:
 
 | Requirement | Notes |
 |-------------|--------|
+| Layout matching defaults (or overrides) | See [Derived defaults](#derived-defaults-from-package) |
 | `GitVersion.yml` at repo root | Used by GitVersion execute |
-| `config.nuspec` | Path passed as `nuspec_path` |
-| SonarCloud project | `sonar_project_key` / `sonar_project_name` must match |
+| SonarCloud project | key/name default to `package` |
 | Secret `SONAR_TOKEN` | SonarCloud |
 | Secret `TAGTOKEN` | PAT that can push tags (ruleset bypass if needed) |
 | NuGet.org trusted publishing (OIDC) | For user `peshkov` — **no** `NUGET_API_KEY` secret |
@@ -47,8 +47,8 @@ Runs on `ubuntu-22.04`:
 
 ## Quick start
 
-1. Copy [`.github/workflows/dotnet.example.yml`](.github/workflows/dotnet.example.yml) → `.github/workflows/dotnet.yml` in the consumer repo.
-2. Replace project-specific `with:` values.
+1. Copy [`.github/workflows/dotnet.example.yml`](.github/workflows/dotnet.example.yml) → `.github/workflows/dotnet.yml`.
+2. Set `package` and `description` (add overrides only if the layout differs).
 3. Prefer pinning a tag/SHA instead of `@master` once stable:
 
 ```yaml
@@ -65,16 +65,8 @@ jobs:
       id-token: write   # NuGet OIDC
     uses: denis-peshkov/ci-templates/.github/workflows/dotnet-reusable.yml@master
     with:
-      solution: 'MyPackage.slnx'
-      product: 'MyPackage'
+      package: 'MyPackage'
       description: 'Short description. Published on NuGet at https://www.nuget.org/packages/MyPackage'
-      repository_url: 'https://github.com/denis-peshkov/MyPackage.git'
-      sonar_project_key: 'MyPackage'
-      sonar_project_name: 'MyPackage'
-      sonar_sources: 'MyPackage/'
-      sonar_tests: 'MyPackage.Tests/'
-      nuspec_path: 'MyPackage/config.nuspec'
-      package_name: 'MyPackage'
     secrets:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
       TAGTOKEN: ${{ secrets.TAGTOKEN }}
@@ -107,46 +99,83 @@ on:
   workflow_dispatch:
 ```
 
+## Derived defaults from `package`
+
+For `package: 'Cross.CQRS.EF'`:
+
+| Value | Default |
+|-------|---------|
+| `solution` | `Cross.CQRS.EF.slnx` |
+| `product` | `Cross.CQRS.EF` |
+| `repository_url` | `https://github.com/{github.repository_owner}/Cross.CQRS.EF.git` |
+| `sonar_organization` | `denis-peshkov` |
+| `sonar_project_key` | `Cross.CQRS.EF` |
+| `sonar_project_name` | `Cross.CQRS.EF` |
+| `sonar_sources` | `Cross.CQRS.EF/` |
+| `sonar_tests` | `Cross.CQRS.EF.Tests/` |
+| `nuspec_path` | `Cross.CQRS.EF/config.nuspec` |
+| `package_name` | `Cross.CQRS.EF` |
+
+Any of these can be overridden via the same-named input.
+
 ## Inputs
 
 | Input | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `solution` | yes | — | Solution file (e.g. `Cross.Identity.slnx`) |
-| `product` | yes | — | MSBuild `Product` |
+| `package` | yes | — | Package / project id; drives derived paths |
 | `description` | yes | — | MSBuild `Description` |
-| `repository_url` | yes | — | MSBuild `RepositoryUrl` (`.git` URL) |
+| `solution` | no | `{package}.slnx` | Solution file |
+| `product` | no | `{package}` | MSBuild `Product` |
+| `repository_url` | no | `https://github.com/{owner}/{package}.git` | MSBuild `RepositoryUrl` |
 | `sonar_organization` | no | `denis-peshkov` | SonarCloud organization |
-| `sonar_project_key` | yes | — | SonarCloud project key |
-| `sonar_project_name` | yes | — | SonarCloud project display name |
-| `sonar_sources` | yes | — | Sources path (trailing `/` recommended) |
-| `sonar_tests` | yes | — | Tests path (trailing `/` recommended) |
-| `sonar_cpd_exclusions` | no | `''` | Optional CPD exclusions; omitted from Sonar args when empty |
-| `nuspec_path` | yes | — | Path to `config.nuspec` |
-| `package_name` | yes | — | Package id used in `nuget push **/Name.{semVer}.symbols.nupkg` |
+| `sonar_project_key` | no | `{package}` | SonarCloud project key |
+| `sonar_project_name` | no | `{package}` | SonarCloud project display name |
+| `sonar_sources` | no | `{package}/` | Sources path |
+| `sonar_tests` | no | `{package}.Tests/` | Tests path |
+| `sonar_cpd_exclusions` | no | `''` | Optional CPD exclusions; omitted when empty |
+| `nuspec_path` | no | `{package}/config.nuspec` | Path to `config.nuspec` |
+| `package_name` | no | `{package}` | Package id for `nuget push` glob |
 | `build_config` | no | `Release` | MSBuild configuration |
 | `dotnet_versions` | no | `6.0.x`…`10.0.x` | Multiline list for `actions/setup-dotnet` |
 
-### Optional inputs (examples)
+### Optional overrides (examples)
 
 **Cross.CQRS** — include netcoreapp3.1 SDK:
 
 ```yaml
-dotnet_versions: |
-  3.1.x
-  6.0.x
-  7.0.x
-  8.0.x
-  9.0.x
-  10.0.x
+with:
+  package: 'Cross.CQRS'
+  description: '...'
+  dotnet_versions: |
+    3.1.x
+    6.0.x
+    7.0.x
+    8.0.x
+    9.0.x
+    10.0.x
 ```
 
-**Cross.Identity** — skip copy/paste noise on process templates:
+**Cross.Identity** — CPD exclusions:
 
 ```yaml
-sonar_cpd_exclusions: '**/ProcessEngine/Definitions/Templates/**'
+with:
+  package: 'Cross.Identity'
+  description: '...'
+  sonar_cpd_exclusions: '**/ProcessEngine/Definitions/Templates/**'
 ```
 
-`sonar_cpd_exclusions` maps to `-Dsonar.cpd.exclusions=...` (Sonar Copy/Paste Detection). Leave unset for most packages.
+**Non-standard layout** (old repos):
+
+```yaml
+with:
+  package: 'Cross.Json'
+  description: '...'
+  solution: 'Cross.Json.sln'
+  nuspec_path: '_nuget/config.nuspec'
+  sonar_tests: ''   # only if you must override; prefer a real tests path when present
+```
+
+`sonar_cpd_exclusions` maps to `-Dsonar.cpd.exclusions=...` (Sonar Copy/Paste Detection).
 
 ## Secrets
 
@@ -168,33 +197,18 @@ NuGet publishing uses OIDC temporary credentials (`NuGet/login@v1`). Do **not** 
 
 ## Migrating an existing `dotnet.yml`
 
-1. Keep `on:` in the consumer repo (align with the recommended triggers above if needed).
-2. Replace the job body with `uses:` + `with:` + `secrets:` + `permissions`.
-3. Map hardcoded values:
-
-| Former inline value | Caller `with:` |
-|---------------------|----------------|
-| `SOLUTION` / env | `solution` |
-| `-p:Product=` | `product` |
-| `-p:Description=` | `description` |
-| `-p:RepositoryUrl=` | `repository_url` |
-| `-Dsonar.projectKey=` | `sonar_project_key` |
-| `-Dsonar.projectName=` | `sonar_project_name` |
-| `-Dsonar.sources=` / `tests=` | `sonar_sources` / `sonar_tests` |
-| `-Dsonar.cpd.exclusions=` | `sonar_cpd_exclusions` (optional) |
-| `nuget pack path/config.nuspec` | `nuspec_path` |
-| push glob package id | `package_name` |
-| extra SDKs (e.g. `3.1.x`) | `dotnet_versions` |
-
-4. Verify on a PR first, then on `dev` / `master` as needed.
+1. Keep `on:` in the consumer repo (align with the recommended triggers if needed).
+2. Replace the job body with `uses:` + `with:` (`package`, `description`, rare overrides) + `secrets:` + `permissions`.
+3. Verify on a PR first, then on `dev` / `master` as needed.
 
 ### Suggested migration order
 
 1. Push/tag this `ci-templates` repo.
-2. Pilot: [Cross.CQRS.EF](https://github.com/denis-peshkov/Cross.CQRS.EF) (no extra inputs).
+2. Pilot: [Cross.CQRS.EF](https://github.com/denis-peshkov/Cross.CQRS.EF) (`package` + `description` only).
 3. [Cross.Identity](https://github.com/denis-peshkov/Cross.Identity) (`sonar_cpd_exclusions`) and [Cross.CQRS](https://github.com/denis-peshkov/Cross.CQRS) (`dotnet_versions` with `3.1.x`).
-4. Other single-package NuGet repos.
-5. **Out of scope** for this workflow: multi-package pack (e.g. Cross.PepperVault), VSIX/Rider (TypeScriptDefinitionGenerator), deploy apps (peshkov.biz), Rust CLIs.
+4. Other single-package NuGet repos that match `{package}.slnx` / `{package}/` / `{package}.Tests/` / `{package}/config.nuspec`.
+5. Older layouts via overrides (`*.sln`, `_nuget/config.nuspec`, `*.UnitTests/`, `src/`/`test/`).
+6. **Out of scope** for this workflow: multi-package pack (e.g. Cross.PepperVault), VSIX/Rider (TypeScriptDefinitionGenerator), deploy apps (peshkov.biz), Rust CLIs.
 
 ## Related
 

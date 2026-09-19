@@ -1,26 +1,35 @@
 # Reusable workflow: build a .NET project
 # For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-net
 # Etalon based on Cross.Identity / Cross.CQRS / Cross.CQRS.EF
+#
+# Minimal caller: package + description. Optional overrides for non-standard layouts.
 name: .NET (reusable)
 
 on:
   workflow_call:
     inputs:
-      solution:
-        description: 'Solution file path'
-        required: true
-        type: string
-      product:
-        description: 'MSBuild Product property'
+      package:
+        description: 'Package / project id (e.g. Cross.CQRS.EF). Drives solution, product, sonar paths, nuspec, push glob unless overridden.'
         required: true
         type: string
       description:
         description: 'MSBuild Description property'
         required: true
         type: string
+      solution:
+        description: 'Override solution file (default: {package}.slnx)'
+        required: false
+        default: ''
+        type: string
+      product:
+        description: 'Override MSBuild Product (default: {package})'
+        required: false
+        default: ''
+        type: string
       repository_url:
-        description: 'MSBuild RepositoryUrl property'
-        required: true
+        description: 'Override MSBuild RepositoryUrl (default: https://github.com/{owner}/{package}.git)'
+        required: false
+        default: ''
         type: string
       sonar_organization:
         description: 'SonarCloud organization'
@@ -28,20 +37,24 @@ on:
         default: 'denis-peshkov'
         type: string
       sonar_project_key:
-        description: 'SonarCloud project key'
-        required: true
+        description: 'Override SonarCloud project key (default: {package})'
+        required: false
+        default: ''
         type: string
       sonar_project_name:
-        description: 'SonarCloud project name'
-        required: true
+        description: 'Override SonarCloud project name (default: {package})'
+        required: false
+        default: ''
         type: string
       sonar_sources:
-        description: 'SonarCloud sources path'
-        required: true
+        description: 'Override SonarCloud sources path (default: {package}/)'
+        required: false
+        default: ''
         type: string
       sonar_tests:
-        description: 'SonarCloud tests path'
-        required: true
+        description: 'Override SonarCloud tests path (default: {package}.Tests/)'
+        required: false
+        default: ''
         type: string
       sonar_cpd_exclusions:
         description: 'Optional SonarCloud CPD exclusions (e.g. **/ProcessEngine/Definitions/Templates/**)'
@@ -49,12 +62,14 @@ on:
         default: ''
         type: string
       nuspec_path:
-        description: 'Path to config.nuspec'
-        required: true
+        description: 'Override path to config.nuspec (default: {package}/config.nuspec)'
+        required: false
+        default: ''
         type: string
       package_name:
-        description: 'NuGet package name (without version)'
-        required: true
+        description: 'Override NuGet package id for push glob (default: {package})'
+        required: false
+        default: ''
         type: string
       build_config:
         description: 'MSBuild configuration'
@@ -85,7 +100,16 @@ jobs:
 
     env:
       BUILD_CONFIG: ${{ inputs.build_config }}
-      SOLUTION: ${{ inputs.solution }}
+      PACKAGE: ${{ inputs.package }}
+      SOLUTION: ${{ inputs.solution != '' && inputs.solution || format('{0}.slnx', inputs.package) }}
+      PRODUCT: ${{ inputs.product != '' && inputs.product || inputs.package }}
+      REPOSITORY_URL: ${{ inputs.repository_url != '' && inputs.repository_url || format('https://github.com/{0}/{1}.git', github.repository_owner, inputs.package) }}
+      SONAR_PROJECT_KEY: ${{ inputs.sonar_project_key != '' && inputs.sonar_project_key || inputs.package }}
+      SONAR_PROJECT_NAME: ${{ inputs.sonar_project_name != '' && inputs.sonar_project_name || inputs.package }}
+      SONAR_SOURCES: ${{ inputs.sonar_sources != '' && inputs.sonar_sources || format('{0}/', inputs.package) }}
+      SONAR_TESTS: ${{ inputs.sonar_tests != '' && inputs.sonar_tests || format('{0}.Tests/', inputs.package) }}
+      NUSPEC_PATH: ${{ inputs.nuspec_path != '' && inputs.nuspec_path || format('{0}/config.nuspec', inputs.package) }}
+      PACKAGE_NAME: ${{ inputs.package_name != '' && inputs.package_name || inputs.package }}
       QUALITY_GATE_WAIT: ${{ github.event_name == 'pull_request' }}
 
     runs-on: ubuntu-22.04 # ubuntu-latest
@@ -130,9 +154,9 @@ jobs:
             -p:FileVersion=${GitVersion_AssemblySemFileVer} \
             -p:InformationalVersion="${GitVersion_InformationalVersion}" \
             -p:Company="Denis Peshkov" \
-            -p:Product="${{ inputs.product }}" \
+            -p:Product="${PRODUCT}" \
             -p:Description="${{ inputs.description }}" \
-            -p:RepositoryUrl="${{ inputs.repository_url }}" \
+            -p:RepositoryUrl="${REPOSITORY_URL}" \
             -p:RepositoryType=git \
             -p:CLSCompliant=true \
             -p:NeutralLanguage=en
@@ -153,11 +177,11 @@ jobs:
         with:
           args: >
             -Dsonar.organization=${{ inputs.sonar_organization }}
-            -Dsonar.projectKey=${{ inputs.sonar_project_key }}
-            -Dsonar.projectName=${{ inputs.sonar_project_name }}
+            -Dsonar.projectKey=${{ env.SONAR_PROJECT_KEY }}
+            -Dsonar.projectName=${{ env.SONAR_PROJECT_NAME }}
             -Dsonar.cs.opencover.reportsPaths=TestResults/**/coverage.opencover.xml
-            -Dsonar.sources=${{ inputs.sonar_sources }}
-            -Dsonar.tests=${{ inputs.sonar_tests }}
+            -Dsonar.sources=${{ env.SONAR_SOURCES }}
+            -Dsonar.tests=${{ env.SONAR_TESTS }}
             ${{ inputs.sonar_cpd_exclusions != '' && format('-Dsonar.cpd.exclusions={0}', inputs.sonar_cpd_exclusions) || '' }}
             -Dsonar.qualitygate.wait=${{ env.QUALITY_GATE_WAIT }}
             -Dsonar.verbose=true
@@ -168,7 +192,7 @@ jobs:
         uses: denis-peshkov/update-nuspec-action@v2
 
       - name: Nuget Pack
-        run: nuget pack ${{ inputs.nuspec_path }} -Symbols -Version ${{ env.semVer }}
+        run: nuget pack ${{ env.NUSPEC_PATH }} -Symbols -Version ${{ env.semVer }}
 
       # Git tags: only stable SemVer on master/release/hotfix.
       - name: Create git Tag
@@ -213,4 +237,4 @@ jobs:
           startsWith(github.ref, 'refs/heads/release/') ||
           startsWith(github.ref, 'refs/heads/hotfix/') ||
           github.ref == 'refs/heads/dev'
-        run: nuget push **/${{ inputs.package_name }}.${{ env.semVer }}.symbols.nupkg -ApiKey ${{ steps.nuget-login.outputs.NUGET_API_KEY }} -Source "https://api.nuget.org/v3/index.json" -SkipDuplicate
+        run: nuget push **/${{ env.PACKAGE_NAME }}.${{ env.semVer }}.symbols.nupkg -ApiKey ${{ steps.nuget-login.outputs.NUGET_API_KEY }} -Source "https://api.nuget.org/v3/index.json" -SkipDuplicate
