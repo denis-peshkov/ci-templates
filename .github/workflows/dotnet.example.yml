@@ -1,6 +1,6 @@
 # Example caller workflow for denis-peshkov/ci-templates
 # Copy to your repository as .github/workflows/dotnet.yml and adjust inputs.
-# This workflow will build a .NET project
+# Triggers/permissions match Cross.Identity / Cross.CQRS / Cross.CQRS.EF
 # For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-net
 name: .NET
 
@@ -12,15 +12,22 @@ on:
       - hotfix/*
       - dev
       - feature/*
+      - fix/*
+      - chore/*
   pull_request:
     types: [opened, synchronize, reopened]
     branches:
       - master
+      - release/*
+      - hotfix/*
       - dev
   workflow_dispatch: # allows manual runs from the Actions tab
 
 jobs:
   build:
+    permissions: # https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#defining-access-for-the-github_token-scopes
+      contents: write
+      id-token: write
     uses: denis-peshkov/ci-templates/.github/workflows/dotnet-reusable.yml@master
     with:
       solution: 'Cross.Identity.slnx'
@@ -28,12 +35,14 @@ jobs:
       description: 'Cross.Identity: identity and authentication flows with JWT and process engine. Published on Nuget at https://www.nuget.org/packages/Cross.Identity'
       repository_url: 'https://github.com/denis-peshkov/Cross.Identity.git'
       sonar_organization: 'denis-peshkov'
-      sonar_project_key: 'denis-peshkov.Cross.Identity'
+      sonar_project_key: 'Cross.Identity'
+      sonar_project_name: 'Cross.Identity'
       sonar_sources: 'Cross.Identity/'
       sonar_tests: 'Cross.Identity.Tests/'
+      # Optional, only if needed (Cross.Identity):
+      # sonar_cpd_exclusions: '**/ProcessEngine/Definitions/Templates/**'
       nuspec_path: 'Cross.Identity/config.nuspec'
       package_name: 'Cross.Identity'
     secrets:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
       TAGTOKEN: ${{ secrets.TAGTOKEN }}
-      NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}

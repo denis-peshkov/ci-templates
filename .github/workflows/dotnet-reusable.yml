@@ -1,5 +1,6 @@
 # Reusable workflow: build a .NET project
 # For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-net
+# Etalon based on Cross.Identity / Cross.CQRS / Cross.CQRS.EF
 name: .NET (reusable)
 
 on:
@@ -30,6 +31,10 @@ on:
         description: 'SonarCloud project key'
         required: true
         type: string
+      sonar_project_name:
+        description: 'SonarCloud project name'
+        required: true
+        type: string
       sonar_sources:
         description: 'SonarCloud sources path'
         required: true
@@ -37,6 +42,11 @@ on:
       sonar_tests:
         description: 'SonarCloud tests path'
         required: true
+        type: string
+      sonar_cpd_exclusions:
+        description: 'Optional SonarCloud CPD exclusions (e.g. **/ProcessEngine/Definitions/Templates/**)'
+        required: false
+        default: ''
         type: string
       nuspec_path:
         description: 'Path to config.nuspec'
@@ -66,14 +76,12 @@ on:
         required: true
       TAGTOKEN:
         required: true
-      NUGET_API_KEY:
-        required: true
 
 jobs:
   build:
     permissions: # https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#defining-access-for-the-github_token-scopes
       contents: write
-      pull-requests: read # required by SonarCloud for PR analysis and decoration
+      id-token: write
 
     env:
       BUILD_CONFIG: ${{ inputs.build_config }}
@@ -88,6 +96,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0 # Disabling shallow clones is recommended for improving the relevancy of reporting
+          # Avoid persisting GITHUB_TOKEN so tag push can authenticate as TAGTOKEN (admin ruleset bypass).
+          persist-credentials: false
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -98,14 +108,15 @@ jobs:
         uses: NuGet/setup-nuget@v2.0.0
 
       - name: Setup GitVersion
-        uses: gittools/actions/gitversion/setup@v1.1.1
+        # v1.x only allows GV >=5.2 <6.1; 6.8.x needs actions v4.7.x
+        # https://github.com/GitTools/actions/blob/main/docs/versions.md
+        uses: gittools/actions/gitversion/setup@v4.7.0
         with:
-          versionSpec: 5.12.0
+          versionSpec: 6.8.2
 
       - name: Determine Version
-        uses: gittools/actions/gitversion/execute@v1.1.1
-        with:
-          useConfigFile: true
+        uses: gittools/actions/gitversion/execute@v4.7.0
+        # defaults to configFilePath: GitVersion.yml (useConfigFile removed in v3+/v4)
 
       - name: Restore dependencies
         run: dotnet restore
@@ -143,34 +154,63 @@ jobs:
           args: >
             -Dsonar.organization=${{ inputs.sonar_organization }}
             -Dsonar.projectKey=${{ inputs.sonar_project_key }}
+            -Dsonar.projectName=${{ inputs.sonar_project_name }}
             -Dsonar.cs.opencover.reportsPaths=TestResults/**/coverage.opencover.xml
             -Dsonar.sources=${{ inputs.sonar_sources }}
             -Dsonar.tests=${{ inputs.sonar_tests }}
+            ${{ inputs.sonar_cpd_exclusions != '' && format('-Dsonar.cpd.exclusions={0}', inputs.sonar_cpd_exclusions) || '' }}
             -Dsonar.qualitygate.wait=${{ env.QUALITY_GATE_WAIT }}
             -Dsonar.verbose=true
         env:
-          GITHUB_TOKEN: ${{ github.token }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
       - name: Update nuspec version
-        uses: denis-peshkov/update-nuspec-action@v1
+        uses: denis-peshkov/update-nuspec-action@v2
 
       - name: Nuget Pack
         run: nuget pack ${{ inputs.nuspec_path }} -Symbols -Version ${{ env.semVer }}
 
+      # Git tags: only stable SemVer on master/release/hotfix.
       - name: Create git Tag
-        if: ${{ contains('refs/heads/master', github.ref) || contains('refs/heads/release', github.ref) || contains('refs/heads/hotfix', github.ref) }}
+        if: >
+          !contains(env.semVer, '-') &&
+          (
+            github.ref == 'refs/heads/master' ||
+            startsWith(github.ref, 'refs/heads/release/') ||
+            startsWith(github.ref, 'refs/heads/hotfix/')
+          )
         run: |
           git tag v${{ env.semVer }}
 
       - name: Push git Tag
-        if: ${{ contains(fromJson('["refs/heads/master", "refs/heads/release", "refs/heads/hotfix"]'), github.ref) }}
+        if: >
+          !contains(env.semVer, '-') &&
+          (
+            github.ref == 'refs/heads/master' ||
+            startsWith(github.ref, 'refs/heads/release/') ||
+            startsWith(github.ref, 'refs/heads/hotfix/')
+          )
         run: |
           git config --global user.name 'Denis Peshkov'
           git config --global user.email 'denis.peshkov@outlook.com'
           git remote set-url origin https://x-access-token:${{ secrets.TAGTOKEN }}@github.com/${{ github.repository }}
           git push origin v${{ env.semVer }}
 
+      - name: NuGet login (OIDC → temp API key)
+        if: >
+          github.ref == 'refs/heads/master' ||
+          startsWith(github.ref, 'refs/heads/release/') ||
+          startsWith(github.ref, 'refs/heads/hotfix/') ||
+          github.ref == 'refs/heads/dev'
+        uses: NuGet/login@v1
+        id: nuget-login
+        with:
+          user: peshkov
+
       - name: Nuget Push
-        if: ${{ !startsWith(github.ref, 'refs/pull') }}
-        run: nuget push **/${{ inputs.package_name }}.${{ env.semVer }}.symbols.nupkg -ApiKey ${{ secrets.NUGET_API_KEY }} -Source "https://api.nuget.org/v3/index.json" -SkipDuplicate
+        if: >
+          github.ref == 'refs/heads/master' ||
+          startsWith(github.ref, 'refs/heads/release/') ||
+          startsWith(github.ref, 'refs/heads/hotfix/') ||
+          github.ref == 'refs/heads/dev'
+        run: nuget push **/${{ inputs.package_name }}.${{ env.semVer }}.symbols.nupkg -ApiKey ${{ steps.nuget-login.outputs.NUGET_API_KEY }} -Source "https://api.nuget.org/v3/index.json" -SkipDuplicate
