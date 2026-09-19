@@ -1,68 +1,82 @@
 # ci-templates
 
-Shared [GitHub Actions](https://docs.github.com/en/actions) reusable workflows for .NET NuGet libraries under [denis-peshkov](https://github.com/denis-peshkov).
+Shared CI templates for .NET NuGet libraries under [denis-peshkov](https://github.com/denis-peshkov).
 
-The `.NET` etalon matches the inline CI used by:
+The `.NET` pipeline matches the inline CI used by:
 
 - [Cross.Identity](https://github.com/denis-peshkov/Cross.Identity)
 - [Cross.CQRS](https://github.com/denis-peshkov/Cross.CQRS)
 - [Cross.CQRS.EF](https://github.com/denis-peshkov/Cross.CQRS.EF)
 
-Caller repositories pass mainly `package` + `description`. Paths and Sonar/NuGet ids are derived unless overridden.
+## Repository layout
+
+```text
+ci-templates/
+├── LICENSE.md
+├── README.md
+└── .github/
+    └── workflows/
+        └── templates/
+            ├── dotnet-reusable.yml   # workflow_call template (package + description)
+            └── dotnet.example.yml    # thin caller example
+```
+
+Templates live under **`.github/workflows/templates/`** so they are not picked up as runnable workflows of this repo.
+
+> **Note:** GitHub Actions only treats YAML files **directly** in `.github/workflows/` as workflows / reusable workflows. Files under `templates/` are for **copy / sync** into consumer repos (or promote a copy to `.github/workflows/*.yml` if you want `uses:`).
 
 ## Contents
 
 | File | Description |
 |------|-------------|
-| [`.github/workflows/dotnet-reusable.yml`](.github/workflows/dotnet-reusable.yml) | Reusable workflow (`workflow_call`) |
-| [`.github/workflows/dotnet.example.yml`](.github/workflows/dotnet.example.yml) | Full caller example — copy as `.github/workflows/dotnet.yml` |
+| [`.github/workflows/templates/dotnet-reusable.yml`](.github/workflows/templates/dotnet-reusable.yml) | Shared pipeline (`on: workflow_call`), inputs derived from `package` |
+| [`.github/workflows/templates/dotnet.example.yml`](.github/workflows/templates/dotnet.example.yml) | Example thin caller — copy/adapt as consumer `.github/workflows/dotnet.yml` |
 
-## Pipeline
+## How to consume
 
-Runs on `ubuntu-22.04`:
+### Option A — Copy into the consumer repo (no `uses:`)
 
-1. **Checkout** — `fetch-depth: 0`, `persist-credentials: false` (so tag push uses `TAGTOKEN`)
-2. **Setup .NET** — SDKs from `dotnet_versions` (default `6.0.x` … `10.0.x`)
-3. **Setup NuGet**
-4. **GitVersion** — `6.8.2` via `gittools/actions` `@v4.7.0` (reads `GitVersion.yml` in the caller repo)
-5. **Restore / Build** — MSBuild metadata from inputs + GitVersion env vars
-6. **Test** — OpenCover → `TestResults/**/coverage.opencover.xml`
-7. **SonarCloud** — quality gate waits only on `pull_request`
-8. **Update nuspec** — [`denis-peshkov/update-nuspec-action@v2`](https://github.com/denis-peshkov/update-nuspec-action)
-9. **NuGet pack** — symbols package from `nuspec_path`
-10. **Git tag** — `v{semVer}` only for **stable** SemVer (no `-`) on `master` / `release/*` / `hotfix/*`
-11. **NuGet OIDC login + push** — on `master` / `release/*` / `hotfix/*` / `dev` (`NuGet/login@v1`, user `peshkov`)
+1. Copy the reusable file (or sync the `templates/` folder) into the consumer repository.
+2. Either:
+   - keep a full inline `dotnet.yml` aligned with this template, or
+   - place the reusable at **`.github/workflows/dotnet-reusable.yml`** in a shared templates repo (top-level) and call it with `uses:`.
 
-## Prerequisites (caller repo)
+Sync one file from `master`:
 
-| Requirement | Notes |
-|-------------|--------|
-| Layout matching defaults (or overrides) | See [Derived defaults](#derived-defaults-from-package) |
-| `GitVersion.yml` at repo root | Used by GitVersion execute |
-| SonarCloud project | key/name default to `package` |
-| Secret `SONAR_TOKEN` | SonarCloud |
-| Secret `TAGTOKEN` | PAT that can push tags (ruleset bypass if needed) |
-| NuGet.org trusted publishing (OIDC) | For user `peshkov` — **no** `NUGET_API_KEY` secret |
-| Access to this repo | Public, or Actions access granted for private callers |
-
-## Quick start
-
-1. Copy [`.github/workflows/dotnet.example.yml`](.github/workflows/dotnet.example.yml) → `.github/workflows/dotnet.yml`.
-2. Set `package` and `description` (add overrides only if the layout differs).
-3. Prefer pinning a tag/SHA instead of `@master` once stable:
-
-```yaml
-uses: denis-peshkov/ci-templates/.github/workflows/dotnet-reusable.yml@v1
+```bash
+curl -fsSL \
+  https://raw.githubusercontent.com/denis-peshkov/ci-templates/master/.github/workflows/templates/dotnet-reusable.yml \
+  -o .github/workflows/dotnet-reusable.yml
 ```
 
-### Minimal caller job
+Or sync the whole templates directory via `git subtree` (directory only — not a single file):
+
+```bash
+git subtree add --prefix=.github/ci-templates \
+  https://github.com/denis-peshkov/ci-templates.git master --squash
+
+git subtree pull --prefix=.github/ci-templates \
+  https://github.com/denis-peshkov/ci-templates.git master --squash
+```
+
+Then copy/link what you need from `.github/ci-templates/.github/workflows/templates/` into `.github/workflows/`.
+
+### Option B — Reusable workflow `uses:` (requires top-level path)
+
+GitHub `uses:` expects a workflow under `.github/workflows/` (not a nested `templates/` path). To call remotely:
+
+1. Publish/promote `dotnet-reusable.yml` as  
+   `.github/workflows/dotnet-reusable.yml` in this repo (top-level), **or**
+2. Point `uses:` at whatever top-level path you actually host.
+
+Example caller (after the reusable file is available at top-level):
 
 ```yaml
 jobs:
   build:
     permissions:
-      contents: write   # git tag push
-      id-token: write   # NuGet OIDC
+      contents: write
+      id-token: write
     uses: denis-peshkov/ci-templates/.github/workflows/dotnet-reusable.yml@master
     with:
       package: 'MyPackage'
@@ -72,11 +86,38 @@ jobs:
       TAGTOKEN: ${{ secrets.TAGTOKEN }}
 ```
 
-`permissions` and `secrets` must be set on the **caller** job. Reusable workflows do not inherit repository secrets automatically.
+See [`.github/workflows/templates/dotnet.example.yml`](.github/workflows/templates/dotnet.example.yml) for triggers + full caller shape.
 
-### Recommended triggers (in the caller)
+Prefer pinning `@v1` / a commit SHA once stable instead of `@master`.
 
-Reusable workflows do **not** define `on:` — keep this in each repo:
+## Pipeline
+
+Runs on `ubuntu-22.04`:
+
+1. **Checkout** — `fetch-depth: 0`, `persist-credentials: false` (tag push uses `TAGTOKEN`)
+2. **Setup .NET** — SDKs from `dotnet_versions` (default `6.0.x` … `10.0.x`)
+3. **Setup NuGet**
+4. **GitVersion** — `6.8.2` via `gittools/actions` `@v4.7.0` (`GitVersion.yml` in the consumer repo)
+5. **Restore / Build** — MSBuild metadata from inputs + GitVersion
+6. **Test** — OpenCover → `TestResults/**/coverage.opencover.xml`
+7. **SonarCloud** — quality gate waits only on `pull_request`
+8. **Update nuspec** — [`denis-peshkov/update-nuspec-action@v2`](https://github.com/denis-peshkov/update-nuspec-action)
+9. **NuGet pack** — symbols from `nuspec_path`
+10. **Git tag** — `v{semVer}` only for **stable** SemVer (no `-`) on `master` / `release/*` / `hotfix/*`
+11. **NuGet OIDC login + push** — on `master` / `release/*` / `hotfix/*` / `dev` (`NuGet/login@v1`, user `peshkov`)
+
+## Prerequisites (consumer repo)
+
+| Requirement | Notes |
+|-------------|--------|
+| Layout matching defaults (or overrides) | See [Derived defaults](#derived-defaults-from-package) |
+| `GitVersion.yml` at repo root | Used by GitVersion execute |
+| SonarCloud project | key/name default to `package` |
+| Secret `SONAR_TOKEN` | SonarCloud |
+| Secret `TAGTOKEN` | PAT for pushing version tags |
+| NuGet.org trusted publishing (OIDC) | User `peshkov` — **no** `NUGET_API_KEY` |
+
+## Recommended triggers (in the consumer)
 
 ```yaml
 on:
@@ -116,7 +157,7 @@ For `package: 'Cross.CQRS.EF'`:
 | `nuspec_path` | `Cross.CQRS.EF/config.nuspec` |
 | `package_name` | `Cross.CQRS.EF` |
 
-Any of these can be overridden via the same-named input.
+Override any of these with the same-named input when the layout differs.
 
 ## Inputs
 
@@ -138,44 +179,33 @@ Any of these can be overridden via the same-named input.
 | `build_config` | no | `Release` | MSBuild configuration |
 | `dotnet_versions` | no | `6.0.x`…`10.0.x` | Multiline list for `actions/setup-dotnet` |
 
-### Optional overrides (examples)
+### Optional overrides
 
-**Cross.CQRS** — include netcoreapp3.1 SDK:
+**Cross.CQRS** — include `3.1.x`:
 
 ```yaml
-with:
-  package: 'Cross.CQRS'
-  description: '...'
-  dotnet_versions: |
-    3.1.x
-    6.0.x
-    7.0.x
-    8.0.x
-    9.0.x
-    10.0.x
+dotnet_versions: |
+  3.1.x
+  6.0.x
+  7.0.x
+  8.0.x
+  9.0.x
+  10.0.x
 ```
 
 **Cross.Identity** — CPD exclusions:
 
 ```yaml
-with:
-  package: 'Cross.Identity'
-  description: '...'
-  sonar_cpd_exclusions: '**/ProcessEngine/Definitions/Templates/**'
+sonar_cpd_exclusions: '**/ProcessEngine/Definitions/Templates/**'
 ```
 
-**Non-standard layout** (old repos):
+**Non-standard layout:**
 
 ```yaml
-with:
-  package: 'Cross.Json'
-  description: '...'
-  solution: 'Cross.Json.sln'
-  nuspec_path: '_nuget/config.nuspec'
-  sonar_tests: ''   # only if you must override; prefer a real tests path when present
+solution: 'Cross.Json.sln'
+nuspec_path: '_nuget/config.nuspec'
+sonar_tests: 'FunctionalTests/'
 ```
-
-`sonar_cpd_exclusions` maps to `-Dsonar.cpd.exclusions=...` (Sonar Copy/Paste Detection).
 
 ## Secrets
 
@@ -184,7 +214,7 @@ with:
 | `SONAR_TOKEN` | yes | SonarCloud token |
 | `TAGTOKEN` | yes | GitHub PAT for pushing version tags |
 
-NuGet publishing uses OIDC temporary credentials (`NuGet/login@v1`). Do **not** pass `NUGET_API_KEY`.
+NuGet publishing uses OIDC (`NuGet/login@v1`). Do **not** pass `NUGET_API_KEY`.
 
 ## Publish / tag matrix
 
@@ -195,20 +225,11 @@ NuGet publishing uses OIDC temporary credentials (`NuGet/login@v1`). Do **not** 
 | `dev` | yes | no | no | yes |
 | `master` / `release/*` / `hotfix/*` | yes | no | yes if SemVer has no `-` | yes |
 
-## Migrating an existing `dotnet.yml`
+## Out of scope
 
-1. Keep `on:` in the consumer repo (align with the recommended triggers if needed).
-2. Replace the job body with `uses:` + `with:` (`package`, `description`, rare overrides) + `secrets:` + `permissions`.
-3. Verify on a PR first, then on `dev` / `master` as needed.
-
-### Suggested migration order
-
-1. Push/tag this `ci-templates` repo.
-2. Pilot: [Cross.CQRS.EF](https://github.com/denis-peshkov/Cross.CQRS.EF) (`package` + `description` only).
-3. [Cross.Identity](https://github.com/denis-peshkov/Cross.Identity) (`sonar_cpd_exclusions`) and [Cross.CQRS](https://github.com/denis-peshkov/Cross.CQRS) (`dotnet_versions` with `3.1.x`).
-4. Other single-package NuGet repos that match `{package}.slnx` / `{package}/` / `{package}.Tests/` / `{package}/config.nuspec`.
-5. Older layouts via overrides (`*.sln`, `_nuget/config.nuspec`, `*.UnitTests/`, `src/`/`test/`).
-6. **Out of scope** for this workflow: multi-package pack (e.g. Cross.PepperVault), VSIX/Rider (TypeScriptDefinitionGenerator), deploy apps (peshkov.biz), Rust CLIs.
+- Multi-package pack (e.g. Cross.PepperVault)
+- VSIX/Rider (TypeScriptDefinitionGenerator)
+- App deploy pipelines, Rust CLIs
 
 ## Related
 
@@ -218,4 +239,4 @@ NuGet publishing uses OIDC temporary credentials (`NuGet/login@v1`). Do **not** 
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE.md)

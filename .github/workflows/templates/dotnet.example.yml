@@ -1,6 +1,16 @@
 # Example caller workflow for denis-peshkov/ci-templates
 # Copy to your repository as .github/workflows/dotnet.yml and adjust inputs.
 # Triggers/permissions match Cross.Identity / Cross.CQRS / Cross.CQRS.EF
+#
+# Source templates live in this repo under:
+#   .github/workflows/templates/dotnet-reusable.yml
+#   .github/workflows/templates/dotnet.example.yml
+#
+# GitHub `uses:` only works for workflows directly under .github/workflows/
+# (not under templates/). Promote/copy dotnet-reusable.yml to:
+#   denis-peshkov/ci-templates/.github/workflows/dotnet-reusable.yml
+# before using the `uses:` line below — or sync/copy templates into the consumer.
+#
 # For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-net
 name: .NET
 
@@ -28,6 +38,7 @@ jobs:
     permissions: # https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#defining-access-for-the-github_token-scopes
       contents: write
       id-token: write
+    # Requires reusable at top-level .github/workflows/dotnet-reusable.yml (see header note).
     uses: denis-peshkov/ci-templates/.github/workflows/dotnet-reusable.yml@master
     with:
       package: 'Cross.Identity'
